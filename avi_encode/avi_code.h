@@ -13,6 +13,9 @@
  *  │       └─ ASTRF_LIST ("strf")       -> 音频格式 ASTRF_INFO (WAVEFORMAT)
  *  ├─ JUNK_CHNK                         -> 对齐块 (播放器或编辑器使用，常见2048对齐)
  *  ├─ MOVI_LIST ("movi")                -> 实际音视频帧数据
+ *  │   ├─ 00dc 视频帧 1
+ *  │   ├─ 01wb 音频帧 1
+ *  │   └─ ...
  *  └─ IDX1_CHNK ("idx1")                -> 索引表 (索引每帧的偏移、大小、标志等)
  *      ├─ IDX1_ENTRY[0]              -> 第一帧（视频或音频）
  *      ├─ IDX1_ENTRY[1]              -> 第二帧
@@ -190,13 +193,16 @@ typedef struct
     // WORD cbSize; // wFormatTag不需要额外信息,则必须将此成员设置为0.WAVE_FORMAT_PCM格式要忽略此成员(wFormatTag == 1)
 } __attribute__((packed)) WAVEFORMAT;
 
-// 索引块
+/**
+ * 索引块 
+ * 
+ */
 typedef struct 
 {
-    DWORD ckid; //记录数据块中子块的标记
-    DWORD dwFlags; //表示chid所指子块的属性
-    DWORD dwChunkOffset; //子块的相对位置
-    DWORD dwChunkLength; //子块长度
+    DWORD ckid; //记录数据块中子块的标记 01wb ...
+    DWORD dwFlags; //表示chid所指子块的属性   0x10表示当前帧是关键帧(I帧) 0x00表示普通帧(P帧或音频帧) jpeg都是关键帧
+    DWORD dwChunkOffset; //子块的相对位置 从"movi"头开始到数据块的偏移量
+    DWORD dwChunkLength; //子块长度 数据块长度
 } __attribute__((packed)) ssdq;
 
 typedef struct {
@@ -238,6 +244,12 @@ typedef struct {
 } __attribute__((packed)) avi_filehead_t;
 
 
+/**
+ * 索引实现
+ * 将所有索引写在索引文件里，对实际写入索引进行计数
+ * 写完数据后，根据实际索引数读取索引并写到avi文件索引块中
+ * 注意 索引文件创建时需要预分配空间,避免频繁创建删除文件导致sd卡文件碎片
+ */
 typedef struct {
     long riff_size_pos; // 文件总大小
     long riff_len;
