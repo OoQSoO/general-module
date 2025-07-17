@@ -1,0 +1,368 @@
+/***********************************************
+*
+*
+*   需要前置文件Nax_TimeTable.c Nax_Dulink.c DS1302.c
+*
+*
+************************************************/
+#include "rtconfig.h"
+// #if ( BK_DEVICE_VERSION == BK_7252_W1_Device )
+#ifdef NAX_ALARMCLOCK
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <typedef.h>
+#include <rtdevice.h>
+#include "rtthread.h"
+#include <time.h>
+
+#include "Nax_config.h"
+#include "Nax_currency.h"
+#include "Nax_sysTools.h"
+#include "Nax_sysDevice.h"
+#include "Nax_dataLib.h"
+#include "Nax_alarm.h"
+#include "Nax_TimeTable.h"
+#include "Nax_Dulink.h"
+#include "DS1302.h"
+
+#define ALARM_UPDATA (1 << 0)
+#define ALARM_MODIFY (1 << 1)
+
+static rt_timer_t  feedtime = NULL;
+static rt_timer_t  twodayime = NULL;
+static rt_event_t  eventFd = NULL;
+static time_t wakeup = 0;
+static char feed_flag = 0;
+volatile uint32_t alarm_flag = 0;
+extern int bk_rand();//真随机
+
+time_t alarm_getWakeup(void)
+{
+    return wakeup;
+}
+
+static void alarm_feedTime( void *parameter )
+{
+    N_Deg("\n");
+    Nax_Motor_Feed(MOTOR_RUN,dataLib_readIntForm(I_FEED_MEASURE));
+    wakeup = 0;
+    dataLib_writeIntForm(I_FEED_MEASURE,0,1);
+    feed_flag = 0;
+    alarm_flag |= ALARM_MODIFY;
+    // N_Deg("%0x\n",rt_event_send( eventFd , EN_G_MDALARM ));
+    return;
+}
+
+static void alarm_twodayTime( void *parameter )
+{
+    u8 hour = 0, min = 0, sec = 0;
+    time_t cur_sec,interval;
+    ds1302_get_Time(&hour,&min,&sec);
+    cur_sec        = Nax_date_to_Sec(hour,min,sec);
+    wakeup         = Nax_date_to_Sec(23,59,59) + 5;
+    N_Deg("%d %d\n",cur_sec,wakeup);
+    interval = wakeup - cur_sec;
+    interval *= 1000;
+    if(interval <= 0) interval = 21600000;
+    interval = (interval > 21600000) ? 21600000 : interval;
+    rt_timer_control(twodayime,RT_TIMER_CTRL_SET_TIME,&interval);
+    alarm_time_feed(1);
+    return;
+}
+
+//重新获取闹钟
+void alarm_time_feed( char parameter )
+{
+    // 手动刷新清除闹钟
+    if (parameter == 0 && feedtime != NULL)
+    {
+        N_Deg("\n");
+        rt_timer_stop(feedtime);
+        rt_timer_delete(feedtime);
+        dataLib_writeIntForm(I_FEED_MEASURE,0,1);
+        feedtime = NULL;
+        feed_flag = 0;
+    }
+    wakeup = 0;
+    N_Deg("\n");
+    alarm_flag |= ALARM_UPDATA;
+    if(eventFd != NULL)
+    {
+        N_Deg("\n");
+        // N_Deg("%0x\n",rt_event_send( eventFd , EN_G_UPDATE ));
+    }
+}    
+
+void alarm_time_test( )
+{
+    // 手动刷新清除闹钟
+    wakeup = 0;
+    N_Deg("\n");
+    if(eventFd != NULL)
+    {
+        N_Deg("\n");
+        N_Deg("%0x\n",rt_event_send( eventFd , EN_G_UPDATE ));
+    }
+}
+
+static void Nax_Alarm_Thread( void *parameter )
+{
+    // rt_uint32_t RrecvEv = 0;
+    // rt_err_t ret = 1;
+    u8 hour = 0, min = 0, sec = 0;
+    static time_t cur_sec,interval;
+    static time_t prv_sec;
+    Nax_TimeList_p tmp = NULL;
+    static char timer_name[8] = {0};
+    // rt_event_recv( eventFd , EN_G_NTP  , RT_EVENT_FLAG_OR | RT_EVENT_FLAG_CLEAR , 30*1000 , NULL );
+    // ds1302_get_Time(&hour,&min,&sec);
+
+    while (1)
+    {
+        tmp = Nax_TimeTable_GetNext_wakeup_Time(0);
+        if(tmp) N_Deg("\n");
+        if(tmp == NULL) N_Deg("\n");
+        
+        if (tmp != NULL )
+        {
+            // tmp_o = tmp->onec_p;
+            ds1302_get_Time(&hour,&min,&sec);
+            N_Deg("%d %d %d\n",hour,min,sec);
+            rt_thread_mdelay(10);
+            ds1302_get_Time(&hour,&min,&sec);
+            cur_sec        = Nax_date_to_Sec(hour,min,sec);
+            if(tmp->hour == 0 && tmp->min == 0 && tmp->sec == 0)
+                wakeup         = Nax_date_to_Sec(tmp->hour,tmp->min,tmp->sec)+15;
+            else
+                wakeup         = Nax_date_to_Sec(tmp->hour,tmp->min,tmp->sec);
+            interval = wakeup - cur_sec;
+            if(interval <= 0) interval = 21600000;
+            N_Deg("%d %d %d\n",hour,min,sec);
+            N_Deg("%d %d\n",cur_sec,wakeup);
+            if( interval == 0)
+            {
+                rt_thread_mdelay(1100);
+                continue;
+            }
+            interval *= 1000;
+            if(feedtime)
+            {
+                rt_timer_stop(feedtime);
+                rt_timer_delete(feedtime);
+                feedtime = NULL;
+                N_Deg("%d\n",feed_flag);
+                if(feed_flag  && (cur_sec - prv_sec) < 10)
+                {
+                    N_Deg("\n");
+                    alarm_feedTime(NULL);
+                }
+                feed_flag = 0;
+            }
+            
+            snprintf(timer_name,8,"feed%02d",bk_rand());
+            N_Deg("\n");
+            feedtime = rt_timer_create(timer_name , alarm_feedTime , NULL , interval , RT_TIMER_FLAG_ONE_SHOT );
+            dataLib_writeIntForm(I_FEED_MEASURE,tmp->mea,1);
+            rt_timer_start( feedtime );
+            feed_flag = 1;
+            prv_sec = wakeup;
+        }
+        else  // 当天无闹钟， 
+        {
+            ds1302_get_Time(&hour,&min,&sec);
+            cur_sec        = Nax_date_to_Sec(hour,min,sec);
+            wakeup         = Nax_date_to_Sec(23,59,59) + 2;
+            N_Deg("%d %d\n",cur_sec,wakeup);
+            interval = wakeup - cur_sec;
+            interval *= 1000;
+
+            if(interval <= 0) interval = 21600000;
+            interval = (interval > 21600000) ? 21600000 : interval;
+            N_Deg("%d\n",interval);
+            if(twodayime != NULL )
+            {
+                N_Deg("\n");
+                rt_timer_stop(twodayime);
+                rt_timer_delete(twodayime);
+                twodayime = NULL;
+            }
+                N_Deg("\n");
+            twodayime = rt_timer_create("tim_twoday" , alarm_twodayTime , NULL , interval , RT_TIMER_FLAG_PERIODIC );
+            rt_timer_start( twodayime );
+                N_Deg("\n");
+        }
+        wakeup = 0;
+
+        while (1)
+        {
+            if(alarm_flag)
+                break;
+            rt_thread_mdelay(1000);
+        }
+        N_Deg("0x%x\n",alarm_flag);
+        if((alarm_flag & ALARM_MODIFY))
+        {
+            alarm_flag &= ~(ALARM_MODIFY);
+            if(tmp)
+            {
+                if(tmp->onec_p)
+                {
+                    N_Deg("1\n");
+                    tmp->onec_p->sta = 0;
+                    Nax_TimeTable_Wakeup_Reflush_File();
+                    // Nax_TimeTable_Wakeup_Reflush_File 里会发送ALARM_UPDATA
+                    alarm_flag &= ~(ALARM_UPDATA);
+                }
+            }
+            rt_thread_mdelay(10*1000);
+        }
+        else if ((alarm_flag & ALARM_UPDATA))
+        {
+            alarm_flag &= ~(ALARM_UPDATA);
+        }
+            N_Deg("0x%x\n",alarm_flag);
+
+        // N_Deg("\n");
+        // ret = rt_event_recv( eventFd , EN_G_MDALARM | EN_G_UPDATE  , RT_EVENT_FLAG_OR | RT_EVENT_FLAG_CLEAR , RT_WAITING_FOREVER , &RrecvEv );
+        // N_Deg("%0x\n",ret);
+        // if(RrecvEv == EN_G_MDALARM)
+        // {
+        //     if(tmp && tmp->onec_p)
+        //     {
+        //         N_Deg("\n");
+        //         tmp->onec_p->sta = 0;
+        //         Nax_TimeTable_Wakeup_Reflush_File();
+        //         // tmp_o = NULL;
+        //     }
+        //     rt_thread_mdelay(10*1000);
+        // }
+    }
+} 
+
+void alarm_TimeInit(void)
+{
+    eventFd = globalEv_findEventHandle( );
+
+    rt_thread_t alarm_thread = RT_NULL;
+    alarm_thread = rt_thread_create("thread_alarm", Nax_Alarm_Thread , RT_NULL,2048, 23, 5);
+    rt_thread_startup(alarm_thread);
+}
+
+UINT32 alarm_timewakeup(void)
+{
+    // time_t wakeup = 0,cur_sec = 0;
+    signed long int wakeup = -1,cur_sec = -1;
+    // time_t wakeup = 0,cur_sec = 0;
+    u8 hour = 0,min = 0,sec = 0;
+    Nax_TimeList_p tmp = NULL;
+    UINT32 sleeptime = 0;
+    // int tmpt = 0;
+    // char buff[32] = {0};
+    ds1302_get_Time(&hour,&min,&sec);
+    N_Deg("now %u:%u:%u\n",hour,min,sec);
+    cur_sec = Nax_date_to_Sec(hour,min,sec);
+    // 获取当前睡眠闹钟的时间,当前时间比闹钟时间早30秒以上就继续睡眠
+    // wakeup = atol(dataLib_readStringForm(S_SLEEP_ALARMTIME));
+    // if( wakeup > cur_sec )
+    // {
+    //     sleeptime     		= (UINT32)(wakeup - cur_sec);   
+    //     return sleeptime;
+    // }
+    // wakeup = 0;
+    tmp = Nax_TimeTable_GetNext_wakeup_Time(1);
+    if(tmp != NULL)
+    {
+        N_Deg("alarm %u:%u:%u\n",tmp->hour,tmp->min,tmp->sec);
+        if(tmp->hour == 0 && tmp->min == 0 && tmp->sec == 0)
+            wakeup         = Nax_date_to_Sec(tmp->hour,tmp->min,tmp->sec)+15;
+        else
+            wakeup         = Nax_date_to_Sec(tmp->hour,tmp->min,tmp->sec);
+        // wakeup = Nax_date_to_Sec(tmp->hour,tmp->min,tmp->sec);
+        dataLib_writeIntForm(I_FEED_MEASURE,tmp->mea,1);
+    }
+    else
+        dataLib_writeIntForm(I_FEED_MEASURE,0,1);
+
+            N_Deg("%ld %ld\n",cur_sec,wakeup);
+    if(wakeup == -1 || wakeup == 0 || wakeup <= cur_sec)
+    {
+        if( wakeup == -1 || wakeup == cur_sec)
+        {
+            switch (hour)
+            {
+            case 0 ... 17:
+                sleeptime     		= 60*60*6; 
+                break;
+            case 18 ... 23:
+                sleeptime     		= (24-hour-1)*60*60+(60-min-1)*60+(60-sec); 
+                break;
+            }
+        }
+        else if(wakeup == 0 || wakeup < cur_sec)
+        {
+            sleeptime     		= 60*10; 
+        }
+    }
+    else  
+    {
+        sleeptime     		= (UINT32)(wakeup - cur_sec);   
+    }
+    N_Deg("now %u:%u:%u\n",hour,min,sec);
+    // sleeptime -= sleeptime*4/300;
+    // if(sleeptime > 3600)
+        ds132_redressTime(sleeptime);
+    return sleeptime;
+}
+extern int ntp_test(int argc, char** argv);
+int alarm_test(int argc, char** argv)
+{
+    ntp_test(argc,argv);
+    if(twodayime != NULL)
+    {
+        rt_timer_stop(twodayime);
+        rt_timer_delete(twodayime);
+    }
+    twodayime = rt_timer_create("tim_twoday" , alarm_twodayTime , NULL , 61*1000 , RT_TIMER_FLAG_PERIODIC );
+    rt_timer_start( twodayime );
+    return 0;
+}
+
+int alarm_testup(int argc, char** argv)
+{
+    alarm_time_test();
+    // N_Deg("\n");
+    // alarm_flag |= ALARM_MODIFY;
+    // N_Deg("\n");
+    return 0;
+}
+
+static void timer_test1111(void *pram)
+{
+    N_Deg("%0x\n",rt_event_send( eventFd , EN_G_UPDATE ));
+}
+
+int timerttt(int argc, char** argv)
+{
+    rt_timer_t  test111 = NULL;
+    test111 = rt_timer_create("tesettt" , timer_test1111 , NULL , 1*1000 , RT_TIMER_FLAG_ONE_SHOT );
+    rt_timer_start(test111);
+    // rt_timer_create("tesettt" , timer_test1111 , NULL , 1*1000 , RT_TIMER_FLAG_ONE_SHOT );
+
+    return 0;
+}
+ 
+MSH_CMD_EXPORT( alarm_test      , alarm_test         );
+MSH_CMD_EXPORT( alarm_testup      , alarm_testup         );
+// MSH_CMD_EXPORT( timerttt      , tmp         );
+#else
+#include "typedef.h"
+void alarm_TimeInit(void)
+{
+    return ;
+}
+UINT32 alarm_timewakeup(void)
+{
+    return 0;
+}
+#endif
