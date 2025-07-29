@@ -117,7 +117,7 @@ static void write_avi_header() {
 
         .AUDIO_LIST = {
             .fcc = FOURCC_LIST,
-            .size = 116,
+            .size = 92,
             .type = FOURCC_STRL,
         },
 
@@ -133,8 +133,8 @@ static void write_avi_header() {
             .wPriority = 0,
             .wLanguage = 0,
             .dwInitalFrames = 0,
-            .dwScale = 320,                   // 每个音频块表示 320 采样点
-            .dwRate = 8000,                 // 每秒 8000 个采样点（即音频速率）
+            .dwScale = 320,                   // 每个音频块表示 320 采样点 1
+            .dwRate = 8000,                 // 每秒 8000 个采样点（即音频速率）16000
             .dwStart = 0,
             .dwLength = 0xffffffff,          // 待定
             .dwSuggestedBufferSize = 16000, // 推荐缓存块大小 640
@@ -161,6 +161,7 @@ static void write_avi_header() {
             .nBlockAlign = 2,
             .wBitsPerSample = 16,
         },
+        
         .J_JUNK_CHNK = {
             .fcc = FOURCC_JUNK,
             .size = 1716,

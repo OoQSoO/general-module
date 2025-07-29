@@ -63,27 +63,16 @@ typedef uint32_t   FOURCC ;   // 4字节
 #define FOURCC_LIST CC("LIST")
 #define FOURCC_RIFF CC("RIFF")
 #define FOURCC_AVI  CC("AVI ")
-#define FOURCC_INFO CC("INFO")
-#define FOURCC_DXDT CC("DXDT")
 #define FOURCC_MJPG CC("MJPG")
 #define FOURCC_HDRL CC("hdrl")
 #define FOURCC_AVIH CC("avih")
 #define FOURCC_STRL CC("strl")
 #define FOURCC_STRH CC("strh")
 #define FOURCC_STRF CC("strf")
-#define FOURCC_STRD CC("strd")
-#define FOURCC_STRN CC("strn")
 #define FOURCC_VIDS CC("vids")
 #define FOURCC_AUDS CC("auds")
-#define FOURCC_ODML CC("odml")
-#define FOURCC_DMLH CC("dmlh")
 #define FOURCC_MOVI CC("movi")
 #define FOURCC_IDX1 CC("idx1")
-#define FOURCC_VPRP CC("vprp")
-
-#define FOURCC_WAVE CC("WAVE")
-#define FOURCC_FMT  CC("fmt ")
-#define FOURCC_DATA CC("data")
 
 typedef struct {
 	FOURCC   fcc;
