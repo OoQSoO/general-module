@@ -1,10 +1,4 @@
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <typedef.h>
-#include <rtdevice.h>
-#include <time.h>
-#include "rtthread.h"
+#include "DS1302.h"
 #define DATA 2
 #define DATA_H rt_pin_write( DATA , PIN_HIGH );
 #define DATA_L rt_pin_write( DATA , PIN_LOW );    
@@ -14,43 +8,15 @@
 #define SCLK 7
 #define SCLK_H rt_pin_write( SCLK , PIN_HIGH );
 #define SCLK_L rt_pin_write( SCLK , PIN_LOW );
-// #define CE_L GPIO_ResetBits(GPIOC,GPIO_Pin_11)//拉低使能位
-// #define CE_H GPIO_SetBits(GPIOC,GPIO_Pin_11)//拉高使能位
-// #define SCLK_L GPIO_ResetBits(GPIOC,GPIO_Pin_12)//拉低时钟线
-// #define SCLK_H  GPIO_SetBits(GPIOC,GPIO_Pin_12)//拉高时钟线
-// #define DATA_L  GPIO_ResetBits(GPIOC,GPIO_Pin_10)//拉低数据线
-// #define DATA_H  GPIO_SetBits(GPIOC,GPIO_Pin_10)//拉高数据线
- 
-struct TIMEData
-{
-	u16 year;
-	u8  month;
-	u8  day;
-	u8  hour;
-	u8  minute;
-	u8  second;
-	u8  week;
-};//创建TIMEData结构体方便存储时间日期数据
-// extern struct TIMEData TimeData;//全局变量
-// void ds1302_gpio_init();//ds1302端口初始化
-// void ds1302_write_onebyte(u8 data);//向ds1302发送一字节数据
-// void ds1302_wirte_rig(u8 address,u8 data);//向指定寄存器写一字节数据
-// u8 ds1302_read_rig(u8 address);//从指定寄存器读一字节数据
-// void ds1032_init();//ds1302初始化函数
-// void ds1032_DATAOUT_init();//IO端口配置为输出
-// void ds1032_DATAINPUT_init();//IO端口配置为输入
-// void ds1032_read_time();//从ds1302读取实时时间（BCD码）
-// void ds1032_read_realTime();//将BCD码转化为十进制数据
-
  
 static struct TIMEData TimeData = {0};
-u8 read_time[7];
- 
- /*
-	MCLK:26MHz, delay(1): about 25us
-				delay(10):about 125us
-				delay(100):about 850us
- */
+static u8 read_time[7];
+
+/*
+MCLK:26MHz, delay(1): about 25us
+            delay(10):about 125us
+            delay(100):about 850us
+*/
 static void delay_us(INT32 num)
 {
     volatile INT32 i, j;
@@ -63,6 +29,12 @@ static void delay_us(INT32 num)
 
 }
 
+/**
+ * @brief 十进制转为十六进制
+ * 
+ * @param num 
+ * @return u8 
+ */
 static u8 convertToHexFormat(int num) {
     u8 result = 0,digit = 0;
     u8 multiplier = 1;
@@ -75,50 +47,24 @@ static u8 convertToHexFormat(int num) {
     return result;
 }
 
-static void ds1302_gpio_init()//CE,SCLK端口初始化
+/**
+ * @brief CE,SCLK端口初始化
+ * 
+ */
+static void ds1302_gpio_init(void)
 {
-    // GPIO_InitTypeDef GPIO_InitStructure;
-    // RCC_APB2PeriphClockCmd(RCC_APB2Periph_GPIOC, ENABLE);
-    // GPIO_InitStructure.GPIO_Pin = GPIO_Pin_11; //PC.11  CE
-    // GPIO_InitStructure.GPIO_Speed = GPIO_Speed_50MHz;
-    // GPIO_InitStructure.GPIO_Mode = GPIO_Mode_Out_PP;//推挽输出
-    // GPIO_Init(GPIOC, &GPIO_InitStructure);//初始化GPIOC.11
-    // GPIO_ResetBits(GPIOC,GPIO_Pin_11); 
     rt_pin_mode(RST,PIN_MODE_OUTPUT);
-    // GPIO_InitStructure.GPIO_Pin = GPIO_Pin_12; //PC.12  SCLK
-    // GPIO_InitStructure.GPIO_Speed = GPIO_Speed_50MHz;
-    // GPIO_InitStructure.GPIO_Mode = GPIO_Mode_Out_PP;//推挽输出
-    // GPIO_Init(GPIOC, &GPIO_InitStructure);//初始化GPIOC.12
-    // GPIO_ResetBits(GPIOC,GPIO_Pin_12); 
     rt_pin_mode(SCLK,PIN_MODE_OUTPUT);
 }
- 
-static void ds1032_DATAOUT_init()//配置双向I/O端口为输出态
+
+/**
+ * @brief 向DS1302发送一字节数据
+ * 
+ * @param data 
+ */
+static void ds1302_write_onebyte(u8 data)//
 {
-    // GPIO_InitTypeDef GPIO_InitStructure;
-    // RCC_APB2PeriphClockCmd(RCC_APB2Periph_GPIOC, ENABLE);
-    
-    // GPIO_InitStructure.GPIO_Pin = GPIO_Pin_10; //PC.10  DATA
-    // GPIO_InitStructure.GPIO_Speed = GPIO_Speed_50MHz;
-    // GPIO_InitStructure.GPIO_Mode = GPIO_Mode_Out_PP;
-    // GPIO_Init(GPIOC, &GPIO_InitStructure);//初始化GPIOC.10
-    // GPIO_ResetBits(GPIOC,GPIO_Pin_10);
     rt_pin_mode(DATA,PIN_MODE_OUTPUT);
-}
- 
-static void ds1032_DATAINPUT_init()//配置双向I/O端口为输入态
-{
-    // GPIO_InitTypeDef GPIO_InitStructure;
-    // RCC_APB2PeriphClockCmd(RCC_APB2Periph_GPIOC, ENABLE);
-    // GPIO_InitStructure.GPIO_Pin = GPIO_Pin_10; //PC.10 DATA
-    // GPIO_InitStructure.GPIO_Mode = GPIO_Mode_IN_FLOATING;
-    // GPIO_Init(GPIOC, &GPIO_InitStructure);//初始化GPIOC.10
-    rt_pin_mode(DATA,PIN_MODE_INPUT);
-}
- 
-static void ds1302_write_onebyte(u8 data)//向DS1302发送一字节数据
-{
-    ds1032_DATAOUT_init();
     u8 count=0;
     SCLK_L;
     for (count=0;count<8;count++)
@@ -131,8 +77,14 @@ static void ds1302_write_onebyte(u8 data)//向DS1302发送一字节数据
         data>>=1;
     }
 }
- 
-static void ds1302_wirte_rig(u8 address,u8 data)//向指定寄存器地址发送数据
+
+/**
+ * @brief 向指定寄存器地址发送数据
+ * 
+ * @param address 寄存器地址
+ * @param data    数据
+ */
+static void ds1302_wirte_rig(u8 address,u8 data)
 {
     u8 temp1=address;
     u8 temp2=data;
@@ -142,8 +94,14 @@ static void ds1302_wirte_rig(u8 address,u8 data)//向指定寄存器地址发送
     ds1302_write_onebyte(temp2);
     RST_L;SCLK_L;delay_us(2);
 }
- 
-u8 ds1302_read_rig(u8 address)//从指定地址读取一字节数据
+
+/**
+ * @brief 从指定地址读取一字节数据
+ * 
+ * @param address 寄存器地址
+ * @return u8 数据
+ */
+static u8 ds1302_read_rig(u8 address)
 {
     u8 temp3=address;
     u8 count=0;
@@ -151,7 +109,7 @@ u8 ds1302_read_rig(u8 address)//从指定地址读取一字节数据
     RST_L;SCLK_L;delay_us(3);
     RST_H;delay_us(3);
     ds1302_write_onebyte(temp3);
-    ds1032_DATAINPUT_init();//配置I/O口为输入
+    rt_pin_mode(DATA,PIN_MODE_INPUT);
     delay_us(2);
     for (count=0;count<8;count++)
     {
@@ -167,26 +125,13 @@ u8 ds1302_read_rig(u8 address)//从指定地址读取一字节数据
     RST_L;DATA_L;
     return return_data;
 }
- 
-void ds1032_init()
-{
-    ds1302_gpio_init();
-    ds1302_wirte_rig(0x8e,0x00);//关闭写保护
-    ds1302_wirte_rig(0x80,0x45);//seconds37秒
-    ds1302_wirte_rig(0x82,0x59);//minutes58分
-    ds1302_wirte_rig(0x84,0x23);//hours23时
-    ds1302_wirte_rig(0x86,0x20);//date30日
-    ds1302_wirte_rig(0x88,0x09);//months9月
-    ds1302_wirte_rig(0x8a,0x05);//days星期日
-    ds1302_wirte_rig(0x8c,0x24);//year2020年
-    ds1302_wirte_rig(0x8e,0x80);//关闭写保护
-}
- 
 
-
-static void ds1032_read_time()
+/**
+ * @brief 获取rtc时间
+ * 
+ */
+static void ds1032_read_time(void)
 {
-    ds1302_gpio_init();
     ds1302_wirte_rig(0x8e,0x00);//关闭写保护
     read_time[0]=ds1302_read_rig(0x81);//读秒
     read_time[1]=ds1302_read_rig(0x83);//读分
@@ -198,8 +143,12 @@ static void ds1032_read_time()
     ds1302_wirte_rig(0x8e,0x80);//关闭写保护
 
 }
- 
-static void ds1032_read_realTime()
+
+/**
+ * @brief rtc时间转为十进制
+ * 
+ */
+static void ds1032_read_realTime(void)
 {
     ds1032_read_time();  //BCD码转换为10进制
     TimeData.second=(read_time[0]>>4)*10+(read_time[0]&0x0f);
@@ -209,6 +158,11 @@ static void ds1032_read_realTime()
     TimeData.month=(read_time[4]>>4)*10+(read_time[4]&0x0f);
     TimeData.week=read_time[5];
     TimeData.year=(read_time[6]>>4)*10+(read_time[6]&0x0f)+2000;
+}
+
+void ds1302_init(void)
+{
+    ds1302_gpio_init();
 }
 
 void ds1032_writeTime(struct tm *time)
@@ -221,12 +175,14 @@ void ds1032_writeTime(struct tm *time)
 
     hour = convertToHexFormat(time->tm_hour);
     min = convertToHexFormat(time->tm_min);
+
+    if(time->tm_sec >= 60) time->tm_sec = 59;
     sec = convertToHexFormat(time->tm_sec);
 
+    if(time->tm_wday == 0) time->tm_wday = 7;
     wday  = convertToHexFormat(time->tm_wday);
 
 
-    ds1302_gpio_init();
     ds1302_wirte_rig(0x8e,0x00);//关闭写保护
     ds1302_wirte_rig(0x8c,(year&0xFF));//year2020年
     ds1302_wirte_rig(0x88,(mon&0xFF));//months9月
@@ -239,10 +195,8 @@ void ds1032_writeTime(struct tm *time)
     ds1032_read_realTime();
 }
 
-void ds1032_get_Time(u8 *hour,u8 *min,u8 *sec)
+void ds1032_get_Time(const TIMEData *data )
 {
     ds1032_read_realTime();
-    *hour =  TimeData.hour;
-    *min = TimeData.minute;
-    *sec = TimeData.second;
+    data = &TimeData;
 }
